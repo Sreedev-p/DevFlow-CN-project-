@@ -36,3 +36,24 @@ class Dissector:
         tcp_header_length = (offset_reserved >> 4) * 4
         
         return src_port, dest_port, tcp_header_length
+    
+    @staticmethod
+    def parse_http(payload_bytes):
+        try:
+            # HTTP/1.x is a plaintext protocol. We attempt to decode it.
+            http_data = payload_bytes.decode('utf-8')
+            
+            # The first line of an HTTP packet contains the critical routing info
+            # e.g., "GET /api/users HTTP/1.1" OR "HTTP/1.1 200 OK"
+            first_line = http_data.split('\r\n')[0]
+            
+            # Filter to ensure we are actually looking at HTTP traffic
+            http_keywords = ['GET ', 'POST ', 'PUT ', 'DELETE ', 'HTTP/1.']
+            if any(keyword in first_line for keyword in http_keywords):
+                return first_line
+                
+        except UnicodeDecodeError:
+            # If it cannot decode to UTF-8, it is binary data (like an image or encrypted TLS)
+            pass 
+            
+        return None
