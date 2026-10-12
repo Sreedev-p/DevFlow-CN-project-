@@ -39,16 +39,22 @@ class CaptureEngine:
                 payload_offset = tcp_offset + tcp_header_length
                 payload_size = len(raw_data) - payload_offset
                 
+                # Only process packets that actually carry data
                 if payload_size > 0:
                     payload = raw_data[payload_offset:]
                     
                     # 4. Decode Application Layer
                     http_info = Dissector.parse_http(payload)
+                    sql_info = Dissector.parse_sql(payload, src_port, dest_port)
                     
                     if http_info:
-                        print(f"\n[+] HTTP Traffic Intercepted:")
+                        print(f"\n[+] HTTP Traffic:")
                         print(f"    Connection: {src_ip}:{src_port} -> {dest_ip}:{dest_port}")
                         print(f"    Payload: {http_info}")
+                    elif sql_info:
+                        print(f"\n[+] SQL Traffic Intercepted:")
+                        print(f"    Connection: {src_ip}:{src_port} -> {dest_ip}:{dest_port}")
+                        print(f"    Payload: {sql_info}")
 
 if __name__ == "__main__":
     engine = CaptureEngine(interface="lo")
