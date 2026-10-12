@@ -57,3 +57,20 @@ class Dissector:
             pass 
             
         return None
+
+    @staticmethod
+    def parse_sql(payload_bytes, src_port, dest_port):
+        try:
+            # PostgreSQL default port is 5432
+            if src_port == 5432 or dest_port == 5432:
+                # Check if it's a Simple Query message ('Q' in ASCII is 81)
+                if len(payload_bytes) > 5 and payload_bytes[0] == 81:
+                    # Skip the 'Q' (1 byte) and the Message Length (4 bytes)
+                    # The string is null-terminated, so we drop the last byte ([:-1])
+                    query_text = payload_bytes[5:-1].decode('utf-8')
+                    return f"PostgreSQL Query: {query_text}"
+        except Exception:
+            # Silently ignore binary data or malformed packets we can't decode
+            pass
+            
+        return None
