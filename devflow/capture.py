@@ -39,7 +39,9 @@ class CaptureEngine:
                 payload_offset = tcp_offset + tcp_header_length
                 payload_size = len(raw_data) - payload_offset
                 
+                # Only process packets that actually carry data
                 if payload_size > 0:
+                    # Slice the raw data from the payload offset to the end of the packet
                     payload = raw_data[payload_offset:]
                     
                     # 4. Decode Application Layer
