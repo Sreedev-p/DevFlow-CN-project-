@@ -1,6 +1,6 @@
 import socket
 import struct
-from dissector import Dissector  # Import our new module
+from dissector import Dissector
 
 class CaptureEngine:
     def __init__(self, interface="lo"):
@@ -23,7 +23,6 @@ class CaptureEngine:
         eth_type = struct.unpack("!6s6sH", eth_header)[2]
 
         if eth_type == 0x0800:  # IPv4
-            # Calculate dynamic IP header length
             ihl = raw_data[14] & 0x0F
             ip_header_length = ihl * 4
 
@@ -37,13 +36,19 @@ class CaptureEngine:
                 # 3. Parse TCP
                 src_port, dest_port, tcp_header_length = Dissector.parse_tcp(raw_data, tcp_offset)
                 
-                # Calculate exactly where the Application Payload (HTTP/SQL) starts
                 payload_offset = tcp_offset + tcp_header_length
                 payload_size = len(raw_data) - payload_offset
                 
-                # Only print packets that actually carry data (ignore empty ACKs)
                 if payload_size > 0:
-                    print(f"[TCP] {src_ip}:{src_port} -> {dest_ip}:{dest_port} | Payload: {payload_size} bytes")
+                    payload = raw_data[payload_offset:]
+                    
+                    # 4. Decode Application Layer
+                    http_info = Dissector.parse_http(payload)
+                    
+                    if http_info:
+                        print(f"\n[+] HTTP Traffic Intercepted:")
+                        print(f"    Connection: {src_ip}:{src_port} -> {dest_ip}:{dest_port}")
+                        print(f"    Payload: {http_info}")
 
 if __name__ == "__main__":
     engine = CaptureEngine(interface="lo")
