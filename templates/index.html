@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>DevFlow Real-Time APM</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Courier New', Courier, monospace;
+            background: #141418;
+            color: #d4d4d8;
+            margin: 0;
+            padding: 24px;
+        }
+        .topbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2d2d35;
+            padding-bottom: 16px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 12px;
+        }
+        .title-group h2 {
+            margin: 0;
+            color: #00e676;
+            font-size: 1.5rem;
+        }
+        .title-group p {
+            margin: 4px 0 0 0;
+            font-size: 0.85rem;
+            color: #888;
+        }
+        .controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .status-pill {
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            background: #1f1f27;
+            border: 1px solid #444;
+        }
+        .btn {
+            background: #23232c;
+            color: #d4d4d8;
+            border: 1px solid #3f3f4e;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 0.82rem;
+        }
+        .btn:hover, .btn.active {
+            background: #00e676;
+            color: #121212;
+            border-color: #00e676;
+            font-weight: bold;
+        }
+        .btn-sim {
+            background: #1e3a5f;
+            color: #56b6c2;
+            border-color: #56b6c2;
+            font-weight: bold;
+        }
+        .btn-sim:hover { background: #56b6c2; color: #121212; }
+        .btn-pause.paused {
+            background: #e5c07b;
+            color: #121212;
+            border-color: #e5c07b;
+            font-weight: bold;
+        }
+        .btn-danger:hover {
+            background: #e06c75;
+            border-color: #e06c75;
+            color: #121212;
+        }
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 14px;
+            margin-bottom: 20px;
+        }
+        .kpi-card {
+            background: #1d1d24;
+            border: 1px solid #2d2d35;
+            border-radius: 6px;
+            padding: 14px 18px;
+        }
+        .kpi-label {
+            font-size: 0.75rem;
+            color: #8e8e98;
+            text-transform: uppercase;
+        }
+        .kpi-value {
+            font-size: 1.45rem;
+            font-weight: bold;
+            margin-top: 6px;
+        }
+        .filter-bar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            background: #1d1d24;
+            border: 1px solid #2d2d35;
+            border-radius: 6px;
+            padding: 12px 16px;
+            margin-bottom: 20px;
+        }
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+        }
+        .filter-label {
+            font-size: 0.75rem;
+            color: #8e8e98;
+            text-transform: uppercase;
+            margin-right: 4px;
+        }
+        .filter-select, .filter-input {
+            background: #141418;
+            color: #e4e4e7;
+            border: 1px solid #3f3f4e;
+            padding: 6px 10px;
+            border-radius: 4px;
+            font-family: inherit;
+            font-size: 0.85rem;
+            outline: none;
+        }
+        .filter-input { min-width: 220px; }
+        .match-counter { font-size: 0.8rem; color: #8e8e98; }
+
+        /* --- Waterfall Trace Group Styles --- */
+        #waterfall-container {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .trace-group {
+            background: #18181f;
+            border: 1px solid #2e2e3a;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+        .trace-header {
+            background: #20202a;
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-bottom: 1px solid #2e2e3a;
+            font-size: 0.88rem;
+        }
+        .trace-id-pill {
+            color: #00e676;
+            font-weight: bold;
+            margin-right: 10px;
+        }
+        .trace-spans {
+            padding: 10px 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .span-row {
+            display: grid;
+            grid-template-columns: 220px 1fr 95px;
+            align-items: center;
+            gap: 12px;
+            font-size: 0.82rem;
+            padding: 6px 8px;
+            background: #141418;
+            border-radius: 4px;
+            border-left: 3px solid #555;
+        }
+        .span-timeline {
+            background: #1e1e26;
+            height: 18px;
+            border-radius: 3px;
+            position: relative;
+            overflow: hidden;
+        }
+        .span-bar {
+            height: 100%;
+            border-radius: 3px;
+            position: absolute;
+            top: 0;
+            min-width: 6px;
+        }
+        .span-payload {
+            grid-column: 1 / -1;
+            color: #c4c4cc;
+            padding-left: 6px;
+            font-size: 0.8rem;
+            word-break: break-all;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 8px;
+        }
+
+        /* --- Flat Event Feed Styles --- */
+        #dashboard {
+            display: none;
+            flex-direction: column;
+            gap: 10px;
+        }
+        .event {
+            background: #1d1d24;
+            padding: 12px 16px;
+            border-radius: 4px;
+            border: 1px solid #2d2d35;
+            border-left: 4px solid #555;
+            line-height: 1.5;
+        }
+        .http-req { border-left-color: #56b6c2; color: #56b6c2; }
+        .http-res { border-left-color: #98c379; color: #98c379; }
+        .sql      { border-left-color: #e5c07b; color: #e5c07b; }
+        .redis    { border-left-color: #e06c75; color: #e06c75; }
+        .tls      { border-left-color: #c678dd; color: #c678dd; }
+        .meta-line {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.9rem;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .badge {
+            display: inline-block;
+            padding: 2px 7px;
+            margin-left: 6px;
+            border-radius: 3px;
+            font-size: 0.73rem;
+            background: #2b2b36;
+            color: #fff;
+        }
+        .proc-badge {
+            background: #282c34;
+            border: 1px solid #4b5263;
+            color: #abb2bf;
+        }
+        .mini-btn {
+            background: #23232c;
+            color: #abb2bf;
+            border: 1px solid #3f3f4e;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 0.72rem;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .mini-btn:hover {
+            border-color: #00e676;
+            color: #00e676;
+        }
+        .payload-line {
+            color: #e4e4e7;
+            margin-top: 6px;
+            word-break: break-all;
+        }
+        .json-box, .hex-box {
+            margin-top: 8px;
+            background: #111115;
+            border: 1px solid #2d2d35;
+            border-radius: 4px;
+            padding: 8px 12px;
+            color: #98c379;
+            font-size: 0.78rem;
+            white-space: pre;
+            overflow-x: auto;
+            grid-column: 1 / -1;
+        }
+        .hex-box {
+            color: #61afef;
+            display: none;
+        }
+        .latency-badge {
+            display: inline-block;
+            margin-top: 6px;
+            padding: 2px 8px;
+            border-radius: 3px;
+            background: #28372c;
+            color: #98c379;
+            font-size: 0.8rem;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="topbar">
+        <div class="title-group">
+            <h2>DevFlow Real-Time APM</h2>
+            <p>Visual Waterfall Request Tracer + L3/L4/L7 Dissector + Kernel PID Mapper</p>
+        </div>
+        <div class="controls">
+            <span id="status" class="status-pill">Connecting...</span>
+            <button id="view-waterfall-btn" class="btn active" onclick="setViewMode('WATERFALL')">🌊 Waterfall View</button>
+            <button id="view-stream-btn" class="btn" onclick="setViewMode('STREAM')">📜 Packet Stream</button>
+            <button class="btn btn-sim" onclick="triggerSimulation()">⚡ Simulate Waterfall</button>
+            <button id="pause-btn" class="btn btn-pause" onclick="togglePause()">⏸ Pause</button>
+            <button class="btn" onclick="exportData('json')">⬇ JSON</button>
+            <button class="btn" onclick="exportData('csv')">⬇ CSV</button>
+            <button class="btn btn-danger" onclick="clearDashboard()">Clear</button>
+        </div>
+    </div>
+
+    <div class="kpi-grid">
+        <div class="kpi-card">
+            <div class="kpi-label">HTTP Requests</div>
+            <div id="kpi-req" class="kpi-value" style="color: #56b6c2;">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">HTTP Responses</div>
+            <div id="kpi-res" class="kpi-value" style="color: #98c379;">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">DB (SQL + Redis)</div>
+            <div id="kpi-db" class="kpi-value" style="color: #e5c07b;">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">TLS Handshakes</div>
+            <div id="kpi-tls" class="kpi-value" style="color: #c678dd;">0</div>
+        </div>
+        <div class="kpi-card">
+            <div class="kpi-label">Avg HTTP RTT</div>
+            <div id="kpi-lat" class="kpi-value" style="color: #00e676;">0.00 ms</div>
+        </div>
+    </div>
+
+    <div class="filter-bar">
+        <div class="filter-group">
+            <span class="filter-label">Protocol:</span>
+            <button class="btn proto-btn active" onclick="setProtocolFilter('ALL', this)">All</button>
+            <button class="btn proto-btn" onclick="setProtocolFilter('HTTP', this)">HTTP</button>
+            <button class="btn proto-btn" onclick="setProtocolFilter('SQL', this)">SQL</button>
+            <button class="btn proto-btn" onclick="setProtocolFilter('REDIS', this)">Redis</button>
+            <button class="btn proto-btn" onclick="setProtocolFilter('TLS', this)">TLS/SNI</button>
+        </div>
+
+        <div class="filter-group">
+            <span class="filter-label">Method:</span>
+            <select id="method-filter" class="filter-select" onchange="applyFilters()">
+                <option value="ALL">Any Method</option>
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+            </select>
+
+            <input
+                type="text"
+                id="keyword-filter"
+                class="filter-input"
+                placeholder="Filter by Trace ID, PID, SQL, SNI, or port..."
+                oninput="applyFilters()"
+            />
+            <button class="btn" onclick="resetFilters()">Reset</button>
+        </div>
+
+        <div id="match-counter" class="match-counter">Showing 0 of 0 events</div>
+    </div>
+
+    <!-- Waterfall View Container -->
+    <div id="waterfall-container"></div>
+
+    <!-- Flat Stream Container -->
+    <div id="dashboard"></div>
+
+    <script>
+        const socket = io();
+        const dashboard = document.getElementById('dashboard');
+        const waterfallContainer = document.getElementById('waterfall-container');
+        const statusEl = document.getElementById('status');
+        const matchCounterEl = document.getElementById('match-counter');
+
+        let currentProtocol = 'ALL';
+        let viewMode = 'WATERFALL';
+        let reqCount = 0, resCount = 0, dbCount = 0, tlsCount = 0;
+        let latencySum = 0, latencyCount = 0;
+        const traceGroups = {};
+
+        const HTTP_METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'HEAD', 'OPTIONS'];
+
+        socket.on('connect', function() {
+            statusEl.textContent = '● Live (lo IPv4/IPv6)';
+            statusEl.style.color = '#00e676';
+            statusEl.style.borderColor = '#00e676';
+        });
+
+        socket.on('disconnect', function() {
+            statusEl.textContent = '○ Disconnected';
+            statusEl.style.color = '#e06c75';
+            statusEl.style.borderColor = '#e06c75';
+        });
+
+        fetch('/api/history')
+            .then(r => r.json())
+            .then(events => events.forEach(ev => renderEvent(ev)));
+
+        socket.on('network_event', function(msg) {
+            renderEvent(msg);
+        });
+
+        function setViewMode(mode) {
+            viewMode = mode;
+            document.getElementById('view-waterfall-btn').classList.toggle('active', mode === 'WATERFALL');
+            document.getElementById('view-stream-btn').classList.toggle('active', mode === 'STREAM');
+            waterfallContainer.style.display = mode === 'WATERFALL' ? 'flex' : 'none';
+            dashboard.style.display = mode === 'STREAM' ? 'flex' : 'none';
+        }
+
+        function extractHttpMethod(type, payload) {
+            if (!type.includes('Request') || !payload) return 'NONE';
+            const token = payload.trim().split(' ')[0].toUpperCase();
+            return HTTP_METHODS.includes(token) ? token : 'NONE';
+        }
+
+        function getColorForType(type) {
+            if (type.includes('Request')) return '#56b6c2';
+            if (type.includes('Response')) return '#98c379';
+            if (type.includes('SQL')) return '#e5c07b';
+            if (type.includes('Redis')) return '#e06c75';
+            if (type.includes('TLS')) return '#c678dd';
+            return '#888';
+        }
+
+        function buildCurlCommand(msg) {
+            const parts = (msg.payload || '').split(' ');
+            const method = parts[0] || 'GET';
+            const path = parts[1] || '/';
+            const dstHostPort = (msg.connection.split('->')[1] || '127.0.0.1:8080').trim();
+            let cmd = `curl -X ${method} "http://${dstHostPort}${path}"`;
+            if (msg.json_body) {
+                const compactJson = JSON.stringify(JSON.parse(msg.json_body));
+                cmd += ` -H "Content-Type: application/json" -d '${compactJson}'`;
+            }
+            return cmd;
+        }
+
+        function copyText(text, btn) {
+            navigator.clipboard.writeText(text);
+            const old = btn.textContent;
+            btn.textContent = '✓ Copied!';
+            setTimeout(() => { btn.textContent = old; }, 1200);
+        }
+
+        function renderWaterfallSpan(msg) {
+            const traceId = msg.trace_id || 'tr-unlinked';
+            let group = traceGroups[traceId];
+
+            if (!group) {
+                const groupEl = document.createElement('div');
+                groupEl.className = 'trace-group';
+                groupEl.dataset.traceId = traceId;
+
+                const headerEl = document.createElement('div');
+                headerEl.className = 'trace-header';
+                headerEl.innerHTML = `
+                    <div>
+                        <span class="trace-id-pill">⛓ ${traceId}</span>
+                        <strong class="trace-title">${msg.payload}</strong>
+                        <span class="badge proc-badge">⚙ ${msg.process || 'system'}</span>
+                    </div>
+                    <div class="trace-summary" style="color:#98c379; font-weight:bold;">In Flight...</div>
+                `;
+
+                const spansEl = document.createElement('div');
+                spansEl.className = 'trace-spans';
+
+                groupEl.appendChild(headerEl);
+                groupEl.appendChild(spansEl);
+                waterfallContainer.prepend(groupEl);
+
+                group = { el: groupEl, spansEl: spansEl, headerEl: headerEl, totalRtt: 25 };
+                traceGroups[traceId] = group;
+            }
+
+            if (msg.latency !== null && msg.latency !== undefined) {
+                group.totalRtt = Math.max(Number(msg.latency), 1);
+                group.headerEl.querySelector('.trace-summary').textContent = `Total RTT: ${msg.latency} ms`;
+            }
+
+            const spanRow = document.createElement('div');
+            spanRow.className = 'span-row';
+            const color = getColorForType(msg.type);
+            spanRow.style.borderLeftColor = color;
+
+            const offsetMs = Number(msg.offset_ms || 0);
+            const leftPct = Math.min((offsetMs / Math.max(group.totalRtt, offsetMs + 5)) * 80, 82);
+            const widthPct = msg.type.includes('Response') ? Math.max(100 - leftPct, 12) : 18;
+
+            const labelCol = document.createElement('div');
+            labelCol.style.color = color;
+            labelCol.innerHTML = `<strong>${msg.type}</strong>`;
+
+            const timelineCol = document.createElement('div');
+            timelineCol.className = 'span-timeline';
+            const bar = document.createElement('div');
+            bar.className = 'span-bar';
+            bar.style.left = `${leftPct}%`;
+            bar.style.width = `${widthPct}%`;
+            bar.style.background = color;
+            timelineCol.appendChild(bar);
+
+            const timeCol = document.createElement('div');
+            timeCol.style.textAlign = 'right';
+            timeCol.style.color = '#8e8e98';
+            timeCol.textContent = msg.latency ? `${msg.latency} ms` : `+${offsetMs} ms`;
+
+            const payloadRow = document.createElement('div');
+            payloadRow.className = 'span-payload';
+
+            const payloadText = document.createElement('span');
+            payloadText.textContent = `${msg.connection} — ${msg.payload}`;
+            payloadRow.appendChild(payloadText);
+
+            const actionBtns = document.createElement('div');
+            actionBtns.style.display = 'flex';
+            actionBtns.style.gap = '6px';
+
+            if (msg.type.includes('Request')) {
+                const curlBtn = document.createElement('button');
+                curlBtn.className = 'mini-btn';
+                curlBtn.textContent = '📋 Copy cURL';
+                curlBtn.onclick = () => copyText(buildCurlCommand(msg), curlBtn);
+                actionBtns.appendChild(curlBtn);
+            }
+
+            let hexBox = null;
+            if (msg.hex_dump) {
+                hexBox = document.createElement('div');
+                hexBox.className = 'hex-box';
+                hexBox.textContent = msg.hex_dump;
+
+                const hexBtn = document.createElement('button');
+                hexBtn.className = 'mini-btn';
+                hexBtn.textContent = '🔍 Hex/ASCII';
+                hexBtn.onclick = () => {
+                    hexBox.style.display = hexBox.style.display === 'block' ? 'none' : 'block';
+                };
+                actionBtns.appendChild(hexBtn);
+            }
+
+            payloadRow.appendChild(actionBtns);
+
+            spanRow.appendChild(labelCol);
+            spanRow.appendChild(timelineCol);
+            spanRow.appendChild(timeCol);
+            spanRow.appendChild(payloadRow);
+
+            if (msg.json_body) {
+                const jsonPre = document.createElement('div');
+                jsonPre.className = 'json-box';
+                jsonPre.textContent = msg.json_body;
+                spanRow.appendChild(jsonPre);
+            }
+            if (hexBox) {
+                spanRow.appendChild(hexBox);
+            }
+
+            group.spansEl.appendChild(spanRow);
+        }
+
+        function renderEvent(msg) {
+            renderWaterfallSpan(msg);
+
+            const div = document.createElement('div');
+            div.className = 'event';
+
+            let protoCode = 'OTHER';
+            if (msg.type.includes('Request')) protoCode = 'HTTP_REQ';
+            else if (msg.type.includes('Response')) protoCode = 'HTTP_RES';
+            else if (msg.type.includes('SQL')) protoCode = 'SQL';
+            else if (msg.type.includes('Redis')) protoCode = 'REDIS';
+            else if (msg.type.includes('TLS')) protoCode = 'TLS';
+
+            const httpMethod = extractHttpMethod(msg.type, msg.payload);
+
+            div.dataset.protocol = protoCode;
+            div.dataset.method = httpMethod;
+            div.dataset.rawJson = JSON.stringify(msg);
+            div.dataset.searchable = `${msg.trace_id || ''} ${msg.type} ${msg.connection} ${msg.process || ''} ${msg.payload} ${msg.json_body || ''}`.toLowerCase();
+
+            if (protoCode === 'HTTP_REQ') {
+                div.classList.add('http-req');
+                reqCount++;
+                document.getElementById('kpi-req').textContent = reqCount;
+            } else if (protoCode === 'HTTP_RES') {
+                div.classList.add('http-res');
+                resCount++;
+                document.getElementById('kpi-res').textContent = resCount;
+                if (msg.latency !== null && msg.latency !== undefined) {
+                    latencySum += Number(msg.latency);
+                    latencyCount++;
+                    document.getElementById('kpi-lat').textContent = (latencySum / latencyCount).toFixed(2) + ' ms';
+                }
+            } else if (protoCode === 'SQL') {
+                div.classList.add('sql');
+                dbCount++;
+                document.getElementById('kpi-db').textContent = dbCount;
+            } else if (protoCode === 'REDIS') {
+                div.classList.add('redis');
+                dbCount++;
+                document.getElementById('kpi-db').textContent = dbCount;
+            } else if (protoCode === 'TLS') {
+                div.classList.add('tls');
+                tlsCount++;
+                document.getElementById('kpi-tls').textContent = tlsCount;
+            }
+
+            const meta = document.createElement('div');
+            meta.className = 'meta-line';
+
+            const leftHeader = document.createElement('strong');
+            leftHeader.textContent = `[${msg.type}] ${msg.connection}`;
+
+            if (msg.trace_id) {
+                const tBadge = document.createElement('span');
+                tBadge.className = 'badge';
+                tBadge.style.color = '#00e676';
+                tBadge.textContent = msg.trace_id;
+                leftHeader.appendChild(tBadge);
+            }
+
+            if (msg.process) {
+                const pBadge = document.createElement('span');
+                pBadge.className = 'badge proc-badge';
+                pBadge.textContent = `⚙ ${msg.process}`;
+                leftHeader.appendChild(pBadge);
+            }
+
+            const rightTime = document.createElement('span');
+            rightTime.textContent = msg.timestamp || '';
+
+            meta.appendChild(leftHeader);
+            meta.appendChild(rightTime);
+            div.appendChild(meta);
+
+            const payload = document.createElement('div');
+            payload.className = 'payload-line';
+            payload.textContent = `Payload: ${msg.payload}`;
+            div.appendChild(payload);
+
+            dashboard.prepend(div);
+            applyFilters();
+        }
+
+        function setProtocolFilter(proto, btnEl) {
+            currentProtocol = proto;
+            document.querySelectorAll('.proto-btn').forEach(b => b.classList.remove('active'));
+            btnEl.classList.add('active');
+            applyFilters();
+        }
+
+        function applyFilters() {
+            const selectedMethod = document.getElementById('method-filter').value;
+            const keyword = document.getElementById('keyword-filter').value.trim().toLowerCase();
+            const cards = document.querySelectorAll('#dashboard .event');
+
+            let visibleCount = 0;
+            cards.forEach(card => {
+                const cProto = card.dataset.protocol;
+                const cMethod = card.dataset.method;
+                const sText = card.dataset.searchable;
+
+                let matchProto = (currentProtocol === 'ALL') ||
+                    (currentProtocol === 'HTTP' && (cProto === 'HTTP_REQ' || cProto === 'HTTP_RES')) ||
+                    (cProto === currentProtocol);
+
+                let matchMethod = (selectedMethod === 'ALL') || (cMethod === selectedMethod);
+                let matchKeyword = (keyword === '') || sText.includes(keyword);
+
+                if (matchProto && matchMethod && matchKeyword) {
+                    card.style.display = 'block';
+                    visibleCount++;
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+
+            // Also filter Waterfall groups by keyword
+            document.querySelectorAll('#waterfall-container .trace-group').forEach(group => {
+                const text = group.textContent.toLowerCase();
+                group.style.display = (keyword === '' || text.includes(keyword)) ? 'block' : 'none';
+            });
+
+            matchCounterEl.textContent = `Showing ${visibleCount} of ${cards.length} events`;
+        }
+
+        function resetFilters() {
+            currentProtocol = 'ALL';
+            document.querySelectorAll('.proto-btn').forEach(b => b.classList.remove('active'));
+            document.querySelector('.proto-btn').classList.add('active');
+            document.getElementById('method-filter').value = 'ALL';
+            document.getElementById('keyword-filter').value = '';
+            applyFilters();
+        }
+
+        function togglePause() {
+            fetch('/api/pause', { method: 'POST' })
+                .then(r => r.json())
+                .then(data => {
+                    const btn = document.getElementById('pause-btn');
+                    if (data.paused) {
+                        btn.textContent = '▶ Resume';
+                        btn.classList.add('paused');
+                        statusEl.textContent = '⏸ Capture Paused';
+                        statusEl.style.color = '#e5c07b';
+                    } else {
+                        btn.textContent = '⏸ Pause';
+                        btn.classList.remove('paused');
+                        statusEl.textContent = '● Live (lo IPv4/IPv6)';
+                        statusEl.style.color = '#00e676';
+                    }
+                });
+        }
+
+        function exportData(format) {
+            const visibleCards = Array.from(document.querySelectorAll('#dashboard .event'))
+                .filter(c => c.style.display !== 'none')
+                .map(c => JSON.parse(c.dataset.rawJson));
+
+            let blob, filename;
+            if (format === 'json') {
+                blob = new Blob([JSON.stringify(visibleCards, null, 2)], { type: 'application/json' });
+                filename = 'devflow_traces.json';
+            } else {
+                const headers = ['timestamp', 'trace_id', 'type', 'connection', 'process', 'offset_ms', 'latency', 'payload'];
+                const rows = visibleCards.map(ev =>
+                    headers.map(h => `"${String(ev[h] ?? '').replace(/"/g, '""')}"`).join(',')
+                );
+                blob = new Blob([[headers.join(','), ...rows].join('\n')], { type: 'text/csv' });
+                filename = 'devflow_traces.csv';
+            }
+
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = filename;
+            link.click();
+        }
+
+        function triggerSimulation() {
+            fetch('/api/simulate', { method: 'POST' });
+        }
+
+        function clearDashboard() {
+            fetch('/api/clear', { method: 'POST' });
+            dashboard.innerHTML = '';
+            waterfallContainer.innerHTML = '';
+            Object.keys(traceGroups).forEach(k => delete traceGroups[k]);
+            applyFilters();
+        }
+    </script>
+</body>
+</html>
