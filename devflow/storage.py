@@ -1,67 +1,83 @@
-import time
-import uuid
+import sqlite3
+import threading
 
 
-class MetricEngine:
-    def __init__(self):
-        # Maps (client_port, server_port) -> {"start": float, "trace_id": str, "proc": str}
-        self.active_requests = {}
-        # Maps process_info -> {"trace_id": str, "start": float} for linking child DB/TLS spans
-        self.active_proc_traces = {}
+class StorageEngine:
+    def __init__(self, db_path="devflow_events.db"):
+        self.db_path = db_path
+        self.lock = threading.Lock()
+        self._init_db()
 
-    def track_request(self, src_port, dest_port, proc_info="Unknown"):
-        if len(self.active_requests) > 1000:
-            self.active_requests.clear()
-            self.active_proc_traces.clear()
-
-        now = time.time()
-        trace_id = f"tr-{uuid.uuid4().hex[:8]}"
-
-        self.active_requests[(src_port, dest_port)] = {
-            "start": now,
-            "trace_id": trace_id,
-            "proc": proc_info
-        }
-
-        # Associate this process with the active trace so downstream SQL/Redis calls link to it
-        if proc_info and proc_info != "Unknown":
-            self.active_proc_traces[proc_info] = {
-                "trace_id": trace_id,
-                "start": now
+    def _init_db(self):
+        with self.lock:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    timestamp TEXT,
+                    type TEXT,
+                    connection TEXT,
+                    process TEXT,
+                    payload TEXT,
+                    json_body TEXT,
+                    latency REAL,
+                    trace_id TEXT,
+                    offset_ms REAL,
+                    hex_dump TEXT
+                )
+            """)
+            existing_cols = {
+                row[1] for row in conn.execute("PRAGMA table_info(events)").fetchall()
             }
+            for col, col_type in (("trace_id", "TEXT"), ("offset_ms", "REAL"), ("hex_dump", "TEXT")):
+                if col not in existing_cols:
+                    conn.execute(f"ALTER TABLE events ADD COLUMN {col} {col_type}")
+            conn.commit()
+            conn.close()
 
-        return trace_id, 0.0
+    def save_event(self, event_dict):
+        with self.lock:
+            try:
+                conn = sqlite3.connect(self.db_path)
+                conn.execute("""
+                    INSERT INTO events (
+                        timestamp, type, connection, process, payload,
+                        json_body, latency, trace_id, offset_ms, hex_dump
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    event_dict.get("timestamp"),
+                    event_dict.get("type"),
+                    event_dict.get("connection"),
+                    event_dict.get("process"),
+                    event_dict.get("payload"),
+                    event_dict.get("json_body"),
+                    event_dict.get("latency"),
+                    event_dict.get("trace_id"),
+                    event_dict.get("offset_ms"),
+                    event_dict.get("hex_dump")
+                ))
+                conn.commit()
+                conn.close()
+            except sqlite3.Error:
+                pass
 
-    def track_child_span(self, proc_info="Unknown"):
-        """
-        Links a downstream SQL, Redis, or TLS packet to an in-flight HTTP request
-        within a 2.5-second window. Returns (trace_id, offset_ms).
-        """
-        now = time.time()
+    def get_recent_events(self, limit=120):
+        with self.lock:
+            conn = sqlite3.connect(self.db_path)
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT timestamp, type, connection, process, payload, json_body, "
+                "latency, trace_id, offset_ms, hex_dump "
+                "FROM events ORDER BY id ASC LIMIT ?",
+                (limit,)
+            ).fetchall()
+            conn.close()
+            return [dict(r) for r in rows]
 
-        # First check exact process match, otherwise fallback to the most recent active request
-        trace_meta = self.active_proc_traces.get(proc_info)
-        if not trace_meta and self.active_requests:
-            latest_req = max(self.active_requests.values(), key=lambda x: x["start"])
-            if now - latest_req["start"] <= 2.5:
-                trace_meta = latest_req
-
-        if trace_meta and (now - trace_meta["start"] <= 2.5):
-            offset_ms = round((now - trace_meta["start"]) * 1000, 2)
-            return trace_meta["trace_id"], offset_ms
-
-        return f"tr-{uuid.uuid4().hex[:8]}", 0.0
-
-    def track_response(self, src_port, dest_port):
-        """
-        Matches the flipped port tuple (server_port, client_port) back to the original HTTP request.
-        Returns (latency_ms, trace_id, offset_ms).
-        """
-        req_key = (dest_port, src_port)
-
-        if req_key in self.active_requests:
-            req_data = self.active_requests.pop(req_key)
-            latency_ms = round((time.time() - req_data["start"]) * 1000, 2)
-            return latency_ms, req_data["trace_id"], latency_ms
-
-        return None, f"tr-{uuid.uuid4().hex[:8]}", 0.0
+    def clear_all(self):
+        with self.lock:
+            conn = sqlite3.connect(self.db_path)
+            conn.execute("DELETE FROM events")
+            conn.commit()
+            conn.close()
